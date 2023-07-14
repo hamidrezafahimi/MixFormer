@@ -1,7 +1,11 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-from lib.models.mixformer_cvt.utils import FrozenBatchNorm2d
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../.."
+sys.path.insert(0, pth)
+from MixFormer.lib.models.mixformer_cvt.utils import FrozenBatchNorm2d
 
 
 def conv(in_planes, out_planes, kernel_size=3, stride=1, padding=1, dilation=1,

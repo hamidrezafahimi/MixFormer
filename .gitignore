@@ -6,3 +6,5 @@
 *.csv
 local.py
 data
+*.pth
+*.tar

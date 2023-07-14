@@ -1,11 +1,15 @@
 import importlib
 import os
-
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../.."
+sys.path.insert(2, pth)
 
 class EnvSettings:
     def __init__(self):
         test_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
+        self.save_dir = pth
+        self.prj_dir = pth 
         self.results_path = '{}/tracking_results/'.format(test_path)
         self.segmentation_path = '{}/segmentation_results/'.format(test_path)
         self.network_path = '{}/networks/'.format(test_path)
@@ -87,6 +91,7 @@ def create_default_local_file_ITP_test(workspace_dir, data_dir, save_dir):
     with open(path, 'w') as f:
         settings = EnvSettings_ITP(workspace_dir, data_dir, save_dir)
 
+        # With new filesystem, if this function is called, the following code may cause errors
         f.write('from lib.test.evaluation.environment import EnvSettings\n\n')
         f.write('def local_env_settings():\n')
         f.write('    settings = EnvSettings()\n\n')
@@ -107,13 +112,15 @@ def create_default_local_file_ITP_test(workspace_dir, data_dir, save_dir):
 
 def env_settings():
     env_module_name = 'lib.test.evaluation.local'
-    try:
-        env_module = importlib.import_module(env_module_name)
-        return env_module.local_env_settings()
-    except:
-        env_file = os.path.join(os.path.dirname(__file__), 'local.py')
+    env_module = importlib.import_module(env_module_name)
+    return env_module.local_env_settings()
+    # try:
+    #     env_module = importlib.import_module(env_module_name)
+    #     return env_module.local_env_settings()
+    # except:
+    #     env_file = os.path.join(os.path.dirname(__file__), 'local.py')
 
-        # Create a default file
-        create_default_local_file()
-        raise RuntimeError('YOU HAVE NOT SETUP YOUR local.py!!!\n Go to "{}" and set all the paths you need. '
-                           'Then try to run again.'.format(env_file))
+    #     # Create a default file
+    #     create_default_local_file()
+    #     raise RuntimeError('YOU HAVE NOT SETUP YOUR local.py!!!\n Go to "{}" and set all the paths you need. '
+    #                        'Then try to run again.'.format(env_file))

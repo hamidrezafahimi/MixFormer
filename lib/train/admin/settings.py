@@ -1,4 +1,4 @@
-from lib.train.admin.environment import env_settings
+from .environment import env_settings
 
 
 class Settings:

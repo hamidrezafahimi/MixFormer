@@ -1,4 +1,9 @@
-from lib.utils import TensorList
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../.."
+sys.path.insert(0, pth)
+
+from MixFormer.lib.utils import TensorList
 import random
 
 

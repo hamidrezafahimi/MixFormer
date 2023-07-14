@@ -1,6 +1,10 @@
 import torch
 import numpy as np
-from lib.utils.misc import NestedTensor
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../.."
+sys.path.insert(0, pth)
+from MixFormer.lib.utils.misc import NestedTensor
 import matplotlib.pyplot as plt
 import os
 

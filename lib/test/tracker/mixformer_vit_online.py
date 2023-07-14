@@ -1,13 +1,18 @@
-from lib.test.tracker.basetracker import BaseTracker
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../.."
+sys.path.insert(0, pth)
+
+from MixFormer.lib.test.tracker.basetracker import BaseTracker
 import torch
-from lib.train.data.processing_utils import sample_target
+from MixFormer.lib.train.data.processing_utils import sample_target, sample_target_multiloc
 # for debug
 import cv2
 import os
-from lib.models.mixformer_vit import build_mixformer_vit_online_score
-from lib.test.tracker.tracker_utils import Preprocessor_wo_mask
-from lib.utils.box_ops import clip_box
-
+from MixFormer.lib.models.mixformer_vit import build_mixformer_vit_online_score
+from MixFormer.lib.test.tracker.tracker_utils import Preprocessor_wo_mask
+from MixFormer.lib.utils.box_ops import clip_box
+import numpy as np
 
 class MixFormerOnline(BaseTracker):
     def __init__(self, params, dataset_name):
@@ -60,8 +65,9 @@ class MixFormerOnline(BaseTracker):
 
     def initialize(self, image, info: dict):
         # forward the template once
-        z_patch_arr, _, z_amask_arr = sample_target(image, info['init_bbox'], self.params.template_factor,
+        z_patch_arr, _, z_amask_arr, _, rect_ = sample_target(image, info['init_bbox'], self.params.template_factor,
                                                     output_sz=self.params.template_size)
+        self._sample_coords = [rect_]
         template = self.preprocessor.process(z_patch_arr)
         self.template = template
         self.online_template = template
@@ -84,48 +90,86 @@ class MixFormerOnline(BaseTracker):
             all_boxes_save = info['init_bbox'] * self.cfg.MODEL.NUM_OBJECT_QUERIES
             return {"all_boxes": all_boxes_save}
 
-    def track(self, image, info: dict = None):
+    def track(self, image, last_state = None, FI: list = None, do_learning=True, info: dict = None):
         H, W, _ = image.shape
         self.frame_id += 1
-        x_patch_arr, resize_factor, x_amask_arr = sample_target(image, self.state, self.params.search_factor,
-                                                                output_sz=self.params.search_size)  # (x1, y1, w, h)
-        search = self.preprocessor.process(x_patch_arr)
-        with torch.no_grad():
-            if self.online_size==1:
-                out_dict, _ = self.network(self.template, self.online_template, search, run_score_head=True)
-            else:
-                out_dict, _ = self.network.forward_test(search, run_score_head=True)
 
-        pred_boxes = out_dict['pred_boxes'].view(-1, 4)
-        pred_score = out_dict['pred_scores'].view(1).sigmoid().item()
-        # Baseline: Take the mean of all pred boxes as the final result
+        if last_state is not None:
+            self.state = last_state
+
+        x_patch_arr, resize_factor, x_amask_arr, _, rect_1 = sample_target(image, np.array(self.state), self.params.search_factor,
+                                                            output_sz=self.params.search_size)  # (x1, y1, w, h)
+        x_patch_arr_2, resize_factor_2, x_amask_arr_2, _, rect_2 = sample_target_multiloc(image, np.array(self.state), FI, self.params.search_factor,
+                                                            output_sz=self.params.search_size)
+        # else:
+        #     x_patch_arr, resize_factor, x_amask_arr, _, rect_1 = sample_target(image, last_state, self.params.search_factor,
+        #                                                         output_sz=self.params.search_size)  # (x1, y1, w, h)
+        #     x_patch_arr_2, resize_factor_2, x_amask_arr_2, _, rect_2 = sample_target_multiloc(image, last_state, FI, self.params.search_factor,
+        #                                                         output_sz=self.params.search_size)
+
+        prev_boxes = [self.state, FI]
+        x_patch_arrs = [x_patch_arr, x_patch_arr_2]
+        resize_factors = [resize_factor, resize_factor_2]
+        all_pred_boxes = []
+        all_pred_scores = []
+
+        self._sample_coords = [rect_1, rect_2]
+
+        for k in range(2):
+            
+            search = self.preprocessor.process(x_patch_arrs[k])
+            with torch.no_grad():
+                if self.online_size==1:
+                    out_dict, _ = self.network(self.template, self.online_template, search, run_score_head=True)
+
+                else:
+                    out_dict, _ = self.network.forward_test(search, run_score_head=True)
+
+            # pred_boxes = out_dict['pred_boxes'].view(-1, 4)
+            # pred_score = out_dict['pred_scores'].view(1).sigmoid().item()
+
+            all_pred_boxes.append(out_dict['pred_boxes'].view(-1, 4))
+            all_pred_scores.append(out_dict['pred_scores'].view(1).sigmoid().item())
+        
+        max_idx = np.argmax(all_pred_scores)
+        pred_score = all_pred_scores[max_idx]
+        self.pred_score = pred_score
+        pred_boxes = all_pred_boxes[max_idx]
+        prev_box = prev_boxes[max_idx]
+        
+        resize_factor = resize_factors[max_idx]
+
+            # Baseline: Take the mean of all pred boxes as the final result
         pred_box = (pred_boxes.mean(dim=0) * self.params.search_size / resize_factor).tolist()  # (cx, cy, w, h) [0,1]
-        # get the final box result
-        self.state = clip_box(self.map_box_back(pred_box, resize_factor), H, W, margin=10)
+            # get the final box result
+        self.state = clip_box(self.map_box_back(prev_box ,pred_box, resize_factor), H, W, margin=10)
 
         self.max_pred_score = self.max_pred_score * self.max_score_decay
+
         # update template
-        if pred_score > 0.5 and pred_score > self.max_pred_score:
-            z_patch_arr, _, z_amask_arr = sample_target(image, self.state,
-                                                        self.params.template_factor,
-                                                        output_sz=self.params.template_size)  # (x1, y1, w, h)
-            self.online_max_template = self.preprocessor.process(z_patch_arr)
-            self.max_pred_score = pred_score
-        if self.frame_id % self.update_interval == 0:
-            if self.online_size == 1:
-                self.online_template = self.online_max_template
-            elif self.online_template.shape[0] < self.online_size:
-                self.online_template = torch.cat([self.online_template, self.online_max_template])
-            else:
-                self.online_template[self.online_forget_id:self.online_forget_id+1] = self.online_max_template
-                self.online_forget_id = (self.online_forget_id + 1) % self.online_size
+        if do_learning:
+            if pred_score > 0.5 and pred_score > self.max_pred_score:
+                z_patch_arr, _, z_amask_arr, _, _ = sample_target(image, self.state,
+                                                            self.params.template_factor,
+                                                            output_sz=self.params.template_size)  # (x1, y1, w, h)
+                self.online_max_template = self.preprocessor.process(z_patch_arr)
+                self.max_pred_score = pred_score
+            
+            if self.frame_id % self.update_interval == 0:
+                if self.online_size == 1:
+                    self.online_template = self.online_max_template
+                elif self.online_template.shape[0] < self.online_size:
+                    self.online_template = torch.cat([self.online_template, self.online_max_template])
+                else:
+                    self.online_template[self.online_forget_id:self.online_forget_id+1] = self.online_max_template
+                    self.online_forget_id = (self.online_forget_id + 1) % self.online_size
 
-            if self.online_size > 1:
-                with torch.no_grad():
-                    self.network.set_online(self.template, self.online_template)
+                if self.online_size > 1:
+                    with torch.no_grad():
+                        self.network.set_online(self.template, self.online_template)
 
-            self.max_pred_score = -1
-            self.online_max_template = self.template
+                self.max_pred_score = -1
+                self.online_max_template = self.template
 
         # for debug
         if self.debug:
@@ -143,8 +187,8 @@ class MixFormerOnline(BaseTracker):
         else:
             return {"target_bbox": self.state}
 
-    def map_box_back(self, pred_box: list, resize_factor: float):
-        cx_prev, cy_prev = self.state[0] + 0.5 * self.state[2], self.state[1] + 0.5 * self.state[3]
+    def map_box_back(self, prev_stat, pred_box: list, resize_factor: float):
+        cx_prev, cy_prev = prev_stat[0] + 0.5 * prev_stat[2], prev_stat[1] + 0.5 * prev_stat[3]
         cx, cy, w, h = pred_box
         half_side = 0.5 * self.params.search_size / resize_factor
         cx_real = cx + (cx_prev - half_side)

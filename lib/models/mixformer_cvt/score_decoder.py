@@ -5,8 +5,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from lib.models.mixformer_cvt.head import MLP
-from external.PreciseRoIPooling.pytorch.prroi_pool import PrRoIPool2D
+from .head import MLP
+
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../../.."
+sys.path.insert(0, pth)
+from lib.PreciseRoIPooling.pytorch.prroi_pool import PrRoIPool2D
 from timm.models.layers import trunc_normal_
 
 class ScoreDecoder(nn.Module):

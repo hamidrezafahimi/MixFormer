@@ -6,13 +6,16 @@ import torch.nn.functional as F
 import timm.models.vision_transformer
 from einops import rearrange
 from timm.models.layers import DropPath, Mlp
-
-from lib.utils.misc import is_main_process
-from lib.models.mixformer_cvt.head import build_box_head
-from lib.models.mixformer_cvt.utils import to_2tuple
-from lib.utils.box_ops import box_xyxy_to_cxcywh, box_cxcywh_to_xyxy
-from lib.models.mixformer_vit.pos_utils import get_2d_sincos_pos_embed
-from lib.models.mixformer_cvt.score_decoder import ScoreDecoder
+import sys
+from pathlib import Path
+pth = str(Path(__file__).parent.resolve()) + "/../../../.."
+sys.path.insert(2, pth)
+from MixFormer.lib.utils.misc import is_main_process
+from MixFormer.lib.models.mixformer_cvt.head import build_box_head
+from MixFormer.lib.models.mixformer_cvt.utils import to_2tuple
+from MixFormer.lib.utils.box_ops import box_xyxy_to_cxcywh, box_cxcywh_to_xyxy
+from MixFormer.lib.models.mixformer_vit.pos_utils import get_2d_sincos_pos_embed
+from MixFormer.lib.models.mixformer_cvt.score_decoder import ScoreDecoder
 
 
 class PatchEmbed(nn.Module):
